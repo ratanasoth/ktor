@@ -16,8 +16,8 @@ import org.junit.Test
 import org.junit.Assert.*
 
 
-open class FullFormTests(factory: HttpClientBackendFactory) : TestWithKtor(factory) {
-    override val server = embeddedServer(Jetty, port) {
+open class FullFormTests(private val factory: HttpClientBackendFactory<*>) : TestWithKtor() {
+    override val server = embeddedServer(Jetty, serverPort) {
         routing {
             get("/hello") {
                 assertEquals("Hello, server", call.receive<String>())
@@ -32,13 +32,13 @@ open class FullFormTests(factory: HttpClientBackendFactory) : TestWithKtor(facto
 
     @Test
     fun testGet() {
-        val client = createClient()
+        val client = HttpClient(factory)
         runBlocking {
             val text = client.call {
                 url {
                     scheme = "http"
                     host = "127.0.0.1"
-                    port = super.port
+                    port = serverPort
                     path = "/hello"
                     method = HttpMethod.Get
                     body = "Hello, server"
@@ -52,35 +52,32 @@ open class FullFormTests(factory: HttpClientBackendFactory) : TestWithKtor(facto
     }
 
     @Test
-    fun testPost() {
-        val client = createClient()
-        runBlocking {
-            val text = client.call {
-                url {
-                    scheme = "http"
-                    host = "127.0.0.1"
-                    port = super.port
-                    path = "/hello"
-                    method = HttpMethod.Post
-                    body = "Hello, server"
-                }
-            }.readText()
+    fun testPost() = runBlocking {
+        val client = HttpClient(factory)
+        val text = client.call {
+            url {
+                scheme = "http"
+                host = "127.0.0.1"
+                port = serverPort
+                path = "/hello"
+                method = HttpMethod.Post
+                body = "Hello, server"
+            }
+        }.readText()
 
-            assertEquals("Hello, client", text)
-        }
-
+        assertEquals("Hello, client", text)
         client.close()
     }
 
     @Test
     fun testRequest() {
-        val client = createClient()
+        val client = HttpClient(factory)
 
         val requestBuilder = request {
             url {
                 host = "localhost"
                 scheme = "http"
-                port = super.port
+                port = serverPort
                 path = "/hello"
                 method = HttpMethod.Get
                 body = "Hello, server"
