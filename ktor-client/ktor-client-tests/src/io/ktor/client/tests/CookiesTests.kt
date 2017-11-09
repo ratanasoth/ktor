@@ -56,7 +56,7 @@ open class CookiesTests(private val factory: HttpClientBackendFactory<*>) : Test
 
     @Test
     fun testUpdate() = runBlocking {
-        val client = HttpClient(factory) {
+        val client = /* createClient() */ HttpClient(factory) {
             install(HttpCookies) {
                 default {
                     set("localhost", Cookie("id", "1"))

@@ -11,8 +11,7 @@ class HttpRequest(
         val method: HttpMethod,
         override val headers: Headers,
         val body: Any,
-        var sslContext: SSLContext?,
-        val followRedirects: Boolean // should it be here?
+        var sslContext: SSLContext?
 ) : HttpMessage {
     val cacheControl: HttpRequestCacheControl by lazy { headers.computeRequestCacheControl() } // and this?
 }
@@ -23,7 +22,6 @@ class HttpRequestBuilder() : HttpMessageBuilder {
     override val headers = HeadersBuilder(caseInsensitiveKey = true)
     var body: Any = EmptyBody
     var sslContext: SSLContext? = null
-    var followRedirects: Boolean = false
 
     val flags = Attributes()
     val cacheControl: HttpRequestCacheControl get() = headers.computeRequestCacheControl()
@@ -34,21 +32,19 @@ class HttpRequestBuilder() : HttpMessageBuilder {
         headers.appendAll(data.headers)
         body = data.body
         sslContext = data.sslContext
-        followRedirects = data.followRedirects
     }
 
     fun headers(block: HeadersBuilder.() -> Unit) = headers.apply(block)
 
     fun url(block: UrlBuilder.() -> Unit) = url.block()
 
-    fun build(): HttpRequest = HttpRequest(url.build(), method, headers.build(), body, sslContext, followRedirects)
+    fun build(): HttpRequest = HttpRequest(url.build(), method, headers.build(), body, sslContext)
 }
 
 fun HttpRequestBuilder.takeFrom(builder: HttpRequestBuilder): HttpRequestBuilder {
     method = builder.method
     body = builder.body
     sslContext = builder.sslContext
-    followRedirects = builder.followRedirects
     url.takeFrom(builder.url)
     headers.appendAll(builder.headers)
 

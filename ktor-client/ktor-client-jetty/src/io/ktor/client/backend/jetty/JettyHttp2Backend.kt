@@ -20,14 +20,9 @@ import java.util.*
 
 class JettyHttp2Backend : HttpClientBackend {
     private val sslContextFactory = SslContextFactory(true)
-
-
     private val jettyClient = HTTP2Client().apply {
         addBean(sslContextFactory)
-    }
-
-    init {
-        jettyClient.start()
+        start()
     }
 
     suspend override fun makeRequest(request: HttpRequest): HttpResponseBuilder {
@@ -61,6 +56,14 @@ class JettyHttp2Backend : HttpClientBackend {
         }
 
         return result
+    }
+
+    override fun close() {
+        jettyClient.stop()
+    }
+
+    companion object : HttpClientBackendFactory<HttpClientBackendConfig> {
+        override fun create(block: HttpClientBackendConfig.() -> Unit): HttpClientBackend = JettyHttp2Backend()
     }
 
     private suspend fun connect(host: String, port: Int): Session {
@@ -101,13 +104,5 @@ class JettyHttp2Backend : HttpClientBackend {
 
             requestChannel.endBody()
         }
-    }
-
-    override fun close() {
-        jettyClient.stop()
-    }
-
-    companion object : HttpClientBackendFactory {
-        override operator fun invoke(block: HttpClientBackendConfig.() -> Unit): HttpClientBackend = JettyHttp2Backend()
     }
 }
