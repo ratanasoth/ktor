@@ -8,6 +8,7 @@ import io.ktor.client.utils.*
 import io.ktor.network.util.*
 import io.ktor.util.*
 import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.io.*
 import org.eclipse.jetty.http.*
 import org.eclipse.jetty.http2.api.*
 import org.eclipse.jetty.http2.client.*
@@ -20,7 +21,6 @@ import java.util.*
 
 class JettyHttp2Backend : HttpClientBackend {
     private val sslContextFactory = SslContextFactory(true)
-
 
     private val jettyClient = HTTP2Client().apply {
         addBean(sslContextFactory)
@@ -38,15 +38,17 @@ class JettyHttp2Backend : HttpClientBackend {
 
         val headersFrame = prepareHeadersFrame(request)
 
-        val response = Http2Response()
-        val requestChannel = withPromise<Stream> { promise ->
-            session.newStream(headersFrame, promise, response.listener)
+        val bodyChannel = ByteChannel()
+        val responseListener = JettyResponseListener(bodyChannel)
+
+        val jettyRequest = withPromise<Stream> { promise ->
+            session.newStream(headersFrame, promise, responseListener)
         }.let { Http2Request(it) }
 
-        sendRequestBody(requestChannel, request.body)
+        sendRequestBody(jettyRequest, request.body)
 
         val result = HttpResponseBuilder()
-        response.awaitHeaders().let {
+        responseListener.awaitHeaders().let {
             result.status = it.statusCode
             result.headers.appendAll(it.headers)
         }
@@ -56,8 +58,8 @@ class JettyHttp2Backend : HttpClientBackend {
             responseTime = Date()
 
             version = HttpProtocolVersion.HTTP_2_0
-            body = ByteReadChannelBody(response.channel())
-            origin = Closeable { response.close() }
+            body = ByteReadChannelBody(bodyChannel)
+            origin = Closeable { bodyChannel.close() }
         }
 
         return result
@@ -89,17 +91,16 @@ class JettyHttp2Backend : HttpClientBackend {
         return HeadersFrame(meta, null, request.body is EmptyBody)
     }
 
-    private suspend fun sendRequestBody(requestChannel: Http2Request, body: Any) {
-        if (body is Unit || body is EmptyBody) return
-        if (body !is HttpMessageBody) error("Wrong payload type: $body, expected HttpMessageBody")
+    private suspend fun sendRequestBody(request: Http2Request, body: Any) {
+        if (body is Unit || body is EmptyBody || body !is HttpMessageBody) return
 
         val sourceChannel = body.toByteReadChannel()
         launch(ioCoroutineDispatcher) {
             while (!sourceChannel.isClosedForRead) {
-                sourceChannel.read { requestChannel.write(it) }
+                sourceChannel.read { request.write(it) }
             }
 
-            requestChannel.endBody()
+            request.endBody()
         }
     }
 

@@ -4,8 +4,7 @@ import io.ktor.client.utils.*
 import io.ktor.http.*
 import io.ktor.network.util.*
 import io.ktor.util.*
-import jdk.nashorn.internal.ir.annotations.*
-import kotlinx.coroutines.experimental.channels.Channel
+import kotlinx.coroutines.experimental.*
 import kotlinx.coroutines.experimental.future.*
 import kotlinx.coroutines.experimental.io.*
 import org.eclipse.jetty.http.*
@@ -14,15 +13,13 @@ import org.eclipse.jetty.http2.api.*
 import org.eclipse.jetty.http2.frames.*
 import org.eclipse.jetty.util.*
 import java.io.*
-import java.nio.ByteBuffer
 import java.nio.channels.*
 import java.util.concurrent.*
 
 
 data class StatusWithHeaders(val statusCode: HttpStatusCode, val headers: Headers)
 
-internal class HttpChannelListener : Stream.Listener {
-    val channel: Channel<ByteBuffer> = Channel(Channel.UNLIMITED)
+internal class JettyResponseListener(private val channel: ByteWriteChannel) : Stream.Listener {
     private val headersBuilder: HeadersBuilder = HeadersBuilder(caseInsensitiveKey = true)
     private val onHeadersReceived: CompletableFuture<HttpStatusCode?> = CompletableFuture()
 
@@ -45,15 +42,17 @@ internal class HttpChannelListener : Stream.Listener {
     }
 
     override fun onData(stream: Stream, frame: DataFrame, callback: Callback) {
-        try {
-            if (frame.data.remaining() > 0 && !channel.offer(frame.data.copy())) {
-                throw IllegalStateException("data.offer() failed")
-            }
+        val data = frame.data.copy()
+        val last = frame.isEndStream
+        launch(ioCoroutineDispatcher) {
+            try {
+                channel.writeFully(data)
+                if (last) channel.close()
 
-            if (frame.isEndStream) channel.close()
-            callback.succeeded()
-        } catch (t: Throwable) {
-            callback.failed(t)
+                callback.succeeded()
+            } catch (t: Throwable) {
+                callback.failed(t)
+            }
         }
     }
 
@@ -65,7 +64,8 @@ internal class HttpChannelListener : Stream.Listener {
         if (frame.isEndStream) channel.close()
 
         onHeadersReceived.complete((frame.metaData as? MetaData.Response)?.let {
-            HttpStatusCode(it.status, it.reason ?: "")
+            val (status, reason) = it.status to it.reason
+            reason?.let { HttpStatusCode(status, reason) } ?: HttpStatusCode.fromValue(status)
         })
     }
 
@@ -77,28 +77,5 @@ internal class HttpChannelListener : Stream.Listener {
 
     companion object {
         private val Ignore = Stream.Listener.Adapter()
-    }
-}
-
-internal class Http2Response {
-    val listener: HttpChannelListener = HttpChannelListener()
-
-    private val body: Channel<ByteBuffer> get() = listener.channel
-
-    suspend fun awaitHeaders(): StatusWithHeaders = listener.awaitHeaders()
-
-    fun channel(): ByteReadChannel {
-        return writer(ioCoroutineDispatcher) {
-            while (true) {
-                val buffer = body.receiveOrNull() ?: break
-                channel.writeFully(buffer)
-            }
-
-            body.close()
-        }.channel
-    }
-
-    fun close() {
-        body.close()
     }
 }
